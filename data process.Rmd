@@ -1,0 +1,115 @@
+---
+title: "Final Project"
+author: "Zhuoyu"
+date: "2022-12-04"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## load packages
+```{r}
+rm(list=ls())
+library(tidyverse)
+library(DBI)
+library(dbplyr)
+library(dplyr)
+library(bigrquery)
+library(gapminder) # import data gapminder
+library(ggplot2)
+```
+## import data
+### connect
+```{r}
+#bq_deauth()
+project <- "secret-griffin-368601"
+con <- dbConnect(
+  bigrquery::bigquery(), #signifying dbConnect that you want to connect to a BigQuery data source
+  project = "bigquery-public-data",
+  dataset = "world_bank_health_population",
+  billing = project
+)
+con 
+dbListTables(con)
+```
+
+
+### select variables interested
+
+The names of variables can be found here : https://datatopics.worldbank.org/health/available-indicators
+
+- medical resources：
+-     Hospital beds (per 1,000 people) 
+-     Nurses and midwives (per 1,000 people)
+-     Physicians (per 1,000 people)
+- the prevalence of diseases
+-     Prevalence of HIV, total (% of population ages 15-49)
+-     Incidence of malaria (per 1,000 population at risk)
+- health expenditure
+-     Current health expenditure per capita (current US$)
+- Population:Population growth (annual %)
+
+#### create sql object
+```{r}
+sql<-"
+SELECT country_name, indicator_name,value, year
+FROM health_nutrition_population
+WHERE 
+      indicator_name =  'Hospital beds (per 1,000 people)' OR
+      indicator_name =  'Nurses and midwives (per 1,000 people)' OR
+      indicator_name =  'Physicians (per 1,000 people)' OR
+      indicator_name =  'Prevalence of hypertension (% of adults ages 30-79)' OR
+      indicator_name =  'Incidence of malaria (per 1,000 population at risk)' OR
+      indicator_name =  'Current health expenditure per capita (current US$)' OR
+      indicator_name = 'Population growth (annual %)' OR
+      indicator_name = 'Prevalence of HIV, total (% of population ages 15-49)'
+        "
+```
+
+```{r}
+#bigquery data saved as a R object
+Robject<-dbGetQuery(con, sql)
+
+#long format -> wide format
+data1<- spread(Robject, 
+               key = indicator_name, 
+               value = value) 
+
+#import variables regions
+data <- readRDS("healthexp.Rds")
+
+# change first column name into "Country"
+colnames(data1)[1] = "Country"
+
+#combine Region with country
+dta <- data1 %>% left_join(data[,c(1,2)], by = "Country")
+
+#droping rows with missing values
+dta_complete<-na.omit(dta)
+dta_complete<-dta_complete%>%
+  filter(year != 2018)
+
+#removing duplicate rows
+dta_complete_unique <- dta_complete[!duplicated(dta_complete), ]
+#remove other datasets
+colnames(dta_complete_unique)[3:9] <-c("Health expenditure per capita(US)",
+  "Hospital beds(per 1000 people)",
+  "Incidence of Malaria(per 1000 population)",
+  "Number of nurses(per 1000 people)",
+  "Number of physicians(per 1000 people)",
+  "Population growth(annual percent)",
+  "Prevalence of HIV(percent)")
+
+write_csv(dta_complete_unique, file = "dta_processed_update2.csv")
+
+
+```
+
+
+## disconnect 
+```{r}
+dbDisconnect(con)
+```
+
